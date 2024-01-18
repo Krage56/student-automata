@@ -4,4 +4,4 @@ There are a few probability distributions that dictate the rules of students' wo
 
 Other details will be provided with the upgrades of the notebook.
 
-The code is a part of courcework on the magister program 'System programming' in the HSE University, Faculty of Computer Science.
+The code is a part of coursework on the magister program 'System programming' in the HSE University, Faculty of Computer Science.
