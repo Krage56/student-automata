@@ -52,6 +52,16 @@ class Task:
     solved: bool
 
 
+
+class Session:
+    start: np.datetime64
+    finish: np.datetime64
+    language: Language
+    tasks: np.int
+    solved: np.int
+    solved_tasks: list[Task]
+
+
 import numpy as np
 def calcNextState(vec) -> StudentState:
     random_num = np.random.uniform(size=1)[0]
@@ -95,26 +105,26 @@ class Student:
     fatige: np.double
     fatige_per_task: list[tuple(LanguageLvl, np.double)]
     learning_langs: list[Language]
-    initial_testing: set[Language]
+    initial_testing: dict[Language, np.double]
     native_language: Language
     average_time_per_task: np.array[tuple(Language, np.double)]
     average_working_time: np.array[np.timedelta64]
     lang_qualification: dict[Language, Qualification]
     activity_times: list[tuple(Topic, np.datetime64)]
     motivated: bool
-    sessions: list[tuple(np.datetime64, np.datetime64)]
+    sessions: dict[Language, Session]
     active_dates_generator: Callable[[np.datetime64], list[np.datetime64]]
     isLearningRecenlty: bool
     __memory_threshold_prob: np.double
-    __long_memorized_topics: dict[Topic, np.datetime64]
-    __short_memorized_topic: dict[Topic, np.datetime64]
+    __long_memorized_tasks: dict[Task, np.datetime64]
+    __short_memorized_tasks: dict[Task, np.datetime64]
     _seed: np.int
     _next_event_time: np.datetime64
     __activity_tmstmp: np.array[np.datetime64]
     __activity_tmstmp_count: np.int
 
     def __init__(self, ID: int, learning_langs: list[Language], native_lang: Language, 
-                average_task_time: np.array[tuple(Language, np.double)], initial_tests: set[Language],
+                average_task_time: np.array[tuple(Language, np.double)], initial_tests: dict[Language, np.double],
                  average_session_time: np.array[np.datetime64], fatige_coef: list[tuple(LanguageLvl, np.double)],
                  initial_qualification: dict[Language, Qualification], prob_threshold: np.double, 
                  registration_date: np.datetime64, 
@@ -133,13 +143,77 @@ class Student:
         self.motivated = motivated
         self.average_working_time = average_session_time
         self.isLearningRecenlty = False
+
+        for language in self.getUniqueLangs():
+            self.sessions[language] = []
         
-        self.__long_memorized_topics = dict()
-        self.__short_memorized_topics = dict() 
+        self.__long_memorized_tasks = dict()
+        self.__short_memorized_tasks = dict() 
+
+    def __correlation_lvl(language: Language) -> np.double:
+        lvl = 0
+        if typing.Self.lang_qualification[language] == Qualification.Middle:
+            lvl = LanguageLvl.B2
+        if typing.Self.lang_qualification[language] == Qualification.High:
+            lvl = LanguageLvl.C1
+
+        if language.lvl < typing.Self.lang_qualification[language]:
+            return 1.0
+        if language.lvl == typing.Self.lang_qualification[language]:
+            return 0.5
+        return 0.0
+    
+
+    def __get_average_errors_normalized(language: Language) -> np.double:
+        sum = 0.0
+        tasks = 0
+        for session in typing.Self.sessions[language]:
+            sum += (session.solved / session.tasks)
+            tasks += session.tasks
+        return np.around(sum / tasks, precision)
+
+    def tryToAddToShortMemory(task: Task, date: np.datetime64):
+        probability = typing.Self.__memory_threshold_prob
+        if not(task.solved):
+            probability *= 0.5
+        point = np.random.uniform(size=1)[0]
+        if point <= probability:
+            typing.Self.__long_memorized_tasks[task] = date
+            return True
+        return False
+    
+    def tryToAddToLongMemory(task: Task, date: np.datetime64) -> bool:
+        count = 0
+        existsGlobalDelfa = False
+        for session in typing.Self.sessions[getLangById(task.language_id)]:
+            if date - session.finish <= np.timedelta64(7, 'd') and task in session.tasks:
+                count += 1
+            if date - session.finish >= np.timedelta64(3, 'd'):
+                existsGlobalDelfa = True
         
-    # def canSolve(task: Task):
-    #     # TODO
+        if existsGlobalDelfa and np.around(3.0 / (0.3 * typing.Self.__memory_threshold_prob), 0) >= count:
+            typing.Self.__long_memorized_tasks[task] = date
+            return True
         
+        return False
+        
+
+    def canSolve(task: Task) -> bool:
+        language = getLangById(task.language_id)
+        correlation = typing.Self.__get_average_errors_normalized(language)
+        initial_score = typing.Self.initial_testing[language]
+        a_e = typing.Self.__get_average_errors_normalized(language)
+        inverted_task = task
+        inverted_task.solved = not(inverted_task.solved)
+        in_short_mem = (task in typing.Self.__short_memorized_tasks or 
+                        inverted_task in typing.Self.__short_memorized_tasks)
+        in_long_mem = task in typing.Self.__long_memorized_tasks
+
+        probability = 0.01 * correlation + 0.03 * initial_score + 0.1 * typing.Self.isLearningRecenlty +\
+            0.05 * (1.0 - (len(typing.Self.learning_lang) / typing.Self.getUniqueLangs())) +\
+            0.2 * (1.0 - typing.Self.fatige) + 0.02 * (1 - a_e) + 0.3 * in_short_mem + 0.2 * in_long_mem
+        
+        return probability <= np.random.uniform(size=1)[0]
     
     def getUniqueLangs() -> np.array[Language]:
         lang_dict = dict()
@@ -168,29 +242,79 @@ class Student:
         learning_lang = np.random.Generator.choice(a=typing.Self.getUniqueLangs, size=1)
         task_delta = np.timedelta64(np.around(np.random.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
         zero = np.timedelta64(0, 's')
-        solved = 0
+        session = Session()
+        session.start = start_date
+        session.solved = 0
+        session.tasks = 0
         result = []
         while (limit - task_delta > zero) and (typing.Self.fatige < 1.0):
             limit -= task_delta
             start_date += task_delta
             task = getTask(learning_lang)
             resultForTask = typing.Self.canSolve(task)
-            logResult()
+            logResult(task, start_date - task_delta, start_date)
             task.solved = resultForTask
             result.append((task, start_date))
             typing.Self.increaseFatige(learning_lang)
             task_delta = np.timedelta64(np.around(np.random.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
-            solved += 1
+            
+            session.tasks += 1
+            if task.solved:
+                session.solved += 1
+                session.solved_tasks.append(task)
+
+            inverted_task = task
+            inverted_task.solved = not(task.solved)
+            if not(task in typing.Self.__short_memorized_tasks or inverted_task in typing.Self.__short_memorized_tasks):
+                typing.Self.tryToAddToShortMemory(task, start_date)
+            else:
+                if task in typing.Self.__short_memorized_tasks and \
+                    start_date - task_data - typing.Self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
+                    del typing.Self.__short_memorized_tasks[task]
+                    typing.Self.tryToAddToShortMemory(task, start_date)
+
+                if inverted_task in typing.Self.__short_memorized_tasks and \
+                    start_date - task_data - typing.Self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
+                    del typing.Self.__short_memorized_tasks[inverted_task]
+                    typing.Self.tryToAddToShortMemory(task, start_date)
+            
+            if not(task.solved and (task in typing.Self.__long_memorized_tasks)):
+                typing.Self.tryToAddToLongMemory(task, start_date)
+            else:
+                if task in typing.Self.__long_memorized_tasks and \
+                    start_date - task_data - typing.Self.__long_memorized_tasks[task] > np.timedelta64(1, 'y'):
+                    del typing.Self.__long_memorized_tasks[task]
+                    typing.Self.tryToAddToLongMemory(task, start_date)
 
             
-        if solved == 0:
+        if session.tasks == 0:
             task_delta = limit
             task = getTask(learning_lang)
             resultForTask = typing.Self.canSolve()
-            logResult()
+            logResult(task, start_date - task_delta, start_date)
             task.solved = resultForTask
             result.append((task, start_date))
+            
+            session.tasks += 1
+            if task.solved:
+                session.solved += 1
+            
+            inverted_task = task
+            inverted_task.solved = not(task.solved)
+            if not(task in typing.Self.__short_memorized_tasks or inverted_task in typing.Self.__short_memorized_tasks):
+                typing.Self.tryToAddToShortMemory(task, start_date)
+            if not(task.solved and (task in typing.Self.__long_memorized_tasks)):
+                typing.Self.tryToAddToLongMemory(task, start_date)
+
+            session.finish = start_date + limit
         
+        else:
+            session.finish = start_date
+
+        session.language = getLangById(result[-1][0].language_id)
+
+        typing.Self.sessions[session.language].append(session)
+
         typing.Self.fatige = 0.0
         return np.array(result)
     
@@ -236,6 +360,7 @@ class Student:
             working_duration = typing.Self.calcWorkDuration(
                 typing.Self.__activity_tmstmp[typing.Self.__activity_tmstmp + 1] - typing.Self.__next_event_time)
             typing.Self.solveSomeTasks(working_duration, typing.Self._next_event_time)
+            
             typing.Self._next_event_time += working_duration
             prob_i = np.array([
                 0.0,                             #Working 
