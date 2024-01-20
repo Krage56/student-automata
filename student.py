@@ -94,6 +94,31 @@ def getTask(learning_lang: Language) -> Task:
     result.solved = False
     return result
 
+def languageFactory(df: pd.DataFrame)->list[Language]:
+    result = []
+    for row in df.iterrows():
+        tmp = Language(int(row.course_order), row.language_name, [row.language_object_id, row.language_session_id])
+        result.append(tmp)
+    return result
+
+
+languages = languageFactory(
+    task_data.drop_duplicates(
+        subset=[
+            'language_object_id', 
+            'language_session_id', 
+            'course_order', 
+            'language_name',
+        ]
+    )
+)
+
+def getLangById(id: list[int]):
+    for language in languages:
+        if language.id == id:
+            return language
+
+
 import numpy as np
 import typing
 import scipy.stats as sps
