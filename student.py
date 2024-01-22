@@ -1,4 +1,13 @@
 from enum import Enum
+import numpy as np
+import pandas as pd
+import typing
+import scipy.stats as sps
+from collections.abc import Callable
+from typing import List, Tuple, Dict
+
+
+
 precision = 6
 class LanguageLvl(Enum):
     A1 = 1
@@ -57,12 +66,11 @@ class Session:
     start: np.datetime64
     finish: np.datetime64
     language: Language
-    tasks: np.int
-    solved: np.int
+    tasks: int
+    solved: int
     solved_tasks: list[Task]
 
 
-import numpy as np
 def calcNextState(vec) -> StudentState:
     random_num = np.random.uniform(size=1)[0]
     bottom_border = 0.0
@@ -75,7 +83,6 @@ def calcNextState(vec) -> StudentState:
 
 
 
-import pandas as pd
 task_data = pd.read_csv('./all_real_task_data.csv')
 def getTask(learning_lang: Language) -> Task:
     obj_id = learning_lang.id[0]
@@ -96,8 +103,8 @@ def getTask(learning_lang: Language) -> Task:
 
 def languageFactory(df: pd.DataFrame)->list[Language]:
     result = []
-    for row in df.iterrows():
-        tmp = Language(int(row.course_order), row.language_name, [row.language_object_id, row.language_session_id])
+    for _, row in df.iterrows():
+        tmp = Language(int(row['course_order']), row['language_name'], [row['language_object_id'], row['language_session_id']])
         result.append(tmp)
     return result
 
@@ -119,23 +126,22 @@ def getLangById(id: list[int]):
             return language
 
 
-import numpy as np
-import typing
-import scipy.stats as sps
-from collections.abc import Callable
+
+def logResult(task: Task, start: np.datetime64, finish: np.datetime64):
+    print('Dummy')
 
 class Student:
-    id: np.int
+    id: int
     state: StudentState
     fatige: np.double
-    fatige_per_task: list[tuple(LanguageLvl, np.double)]
+    fatige_per_task: list[Tuple[LanguageLvl, np.double]]
     learning_langs: list[Language]
     initial_testing: dict[Language, np.double]
     native_language: Language
-    average_time_per_task: np.array[tuple(Language, np.double)]
-    average_working_time: np.array[np.timedelta64]
+    average_time_per_task: np.ndarray[Tuple[Language, np.double]]
+    average_working_time: np.ndarray[np.timedelta64]
     lang_qualification: dict[Language, Qualification]
-    activity_times: list[tuple(Topic, np.datetime64)]
+    activity_times: list[Tuple[Topic, np.datetime64]]
     motivated: bool
     sessions: dict[Language, Session]
     active_dates_generator: Callable[[np.datetime64], list[np.datetime64]]
@@ -143,14 +149,14 @@ class Student:
     __memory_threshold_prob: np.double
     __long_memorized_tasks: dict[Task, np.datetime64]
     __short_memorized_tasks: dict[Task, np.datetime64]
-    _seed: np.int
+    _seed: int
     _next_event_time: np.datetime64
-    __activity_tmstmp: np.array[np.datetime64]
-    __activity_tmstmp_count: np.int
+    __activity_tmstmp: np.ndarray[np.datetime64]
+    __activity_tmstmp_count: int
 
     def __init__(self, ID: int, learning_langs: list[Language], native_lang: Language, 
-                average_task_time: np.array[tuple(Language, np.double)], initial_tests: dict[Language, np.double],
-                 average_session_time: np.array[np.datetime64], fatige_coef: list[tuple(LanguageLvl, np.double)],
+                average_task_time: np.ndarray[Tuple[Language, np.double]], initial_tests: dict[Language, np.double],
+                 average_session_time: np.ndarray[np.datetime64], fatige_coef: list[Tuple[LanguageLvl, np.double]],
                  initial_qualification: dict[Language, Qualification], prob_threshold: np.double, 
                  registration_date: np.datetime64, 
                  motivated: bool):
@@ -240,7 +246,7 @@ class Student:
         
         return probability <= np.random.uniform(size=1)[0]
     
-    def getUniqueLangs() -> np.array[Language]:
+    def getUniqueLangs() -> np.ndarray[Language]:
         lang_dict = dict()
         lang_names = set()
         for language in typing.Self.learning_langs:
@@ -250,9 +256,9 @@ class Student:
             else:
                 lang_dict.update([language.name, language])
                 lang_names.add(language.name)
-        return np.array(lang_dict.values())
+        return np.ndarray(lang_dict.values())
     
-    def setWorkingDates(start_date: np.datetime64) -> np.array[np.datetime64]:
+    def setWorkingDates(start_date: np.datetime64) -> np.ndarray[np.datetime64]:
         typing.Self.__activity_tmstmp = typing.Self.active_dates_generator(start_date)
         typing.Self._activity_tmstmp_count = 0
         return typing.Self.__activity_tmstmp
@@ -263,7 +269,7 @@ class Student:
         if new_fatigue <= 1.0:
             typing.Self.fatige = new_fatigue
         
-    def solveSomeTasks(limit: np.timedelta64, start_date: np.datetime64) -> np.array[tuple(Task, np.datetime64)]:
+    def solveSomeTasks(limit: np.timedelta64, start_date: np.datetime64) -> np.ndarray[Tuple[Task, np.datetime64]]:
         learning_lang = np.random.Generator.choice(a=typing.Self.getUniqueLangs, size=1)
         task_delta = np.timedelta64(np.around(np.random.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
         zero = np.timedelta64(0, 's')
@@ -341,7 +347,7 @@ class Student:
         typing.Self.sessions[session.language].append(session)
 
         typing.Self.fatige = 0.0
-        return np.array(result)
+        return np.ndarray(result)
     
     
 
@@ -387,15 +393,15 @@ class Student:
             typing.Self.solveSomeTasks(working_duration, typing.Self._next_event_time)
             
             typing.Self._next_event_time += working_duration
-            prob_i = np.array([
+            prob_i = np.ndarray([
                 0.0,                             #Working 
                 np.around(1.0 / 3.0, precision), #Learning
                 np.around(1.0 / 3.0, precision), #Inactive
                 np.around(1.0 / 3.0, precision), #Dead
             ])
             langs = typing.Self.getUniqueLangs()
-            result_prob = np.array([0.0, 0.0, 0.0, 0.0])         
-            vectors = np.array([prob_i for _ in len(langs)])
+            result_prob = np.ndarray([0.0, 0.0, 0.0, 0.0])         
+            vectors = np.ndarray([prob_i for _ in len(langs)])
             for i, language in enumerate(langs):
                 if language.lvl < LanguageLvl.B1:
                     vectors[i][2] += 0.1
