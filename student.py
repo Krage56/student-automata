@@ -84,10 +84,10 @@ def calcNextState(vec) -> StudentState:
 
 
 task_data = pd.read_csv('./all_real_task_data.csv')
-def getTask(learning_lang: Language) -> Task:
+def getTask(learning_lang: Language, generator: np.random.Generator) -> Task:
     obj_id = learning_lang.id[0]
     session_id = learning_lang.id[1]
-    task_row = task_data[(task_data.language_object_id == obj_id) & (task_data.language_session_id == session_id)].sample(1)
+    task_row = task_data[(task_data.language_object_id == obj_id) & (task_data.language_session_id == session_id)].sample(1, random_state=generator)
     result = Task()
     result.id = [task_row.iloc[0]['task_object_id'], task_row.iloc[0]['task_session_id']]
     result.course_id = [task_row.iloc[0]['course_object_id'], task_row.iloc[0]['course_session_id']]
@@ -150,6 +150,7 @@ class Student:
     __long_memorized_tasks: dict[Task, np.datetime64]
     __short_memorized_tasks: dict[Task, np.datetime64]
     _seed: int
+    _generator: np.random.Generator
     _next_event_time: np.datetime64
     __activity_tmstmp: np.ndarray[np.datetime64]
     __activity_tmstmp_count: int
@@ -158,7 +159,7 @@ class Student:
                 average_task_time: np.ndarray[Tuple[Language, np.double]], initial_tests: dict[Language, np.double],
                  average_session_time: np.ndarray[np.datetime64], fatige_coef: list[Tuple[LanguageLvl, np.double]],
                  initial_qualification: dict[Language, Qualification], prob_threshold: np.double, 
-                 registration_date: np.datetime64, 
+                 registration_date: np.datetime64, np_seed: int,
                  motivated: bool):
         self.id = ID
         self.state = StudentState.Initial
@@ -178,8 +179,12 @@ class Student:
         for language in self.getUniqueLangs():
             self.sessions[language] = []
         
+        self._seed = np_seed
+        self._generator = np.random.default_rng(self._seed)
+        
         self.__long_memorized_tasks = dict()
-        self.__short_memorized_tasks = dict() 
+        self.__short_memorized_tasks = dict()
+
 
     def __correlation_lvl(language: Language) -> np.double:
         lvl = 0
@@ -207,7 +212,7 @@ class Student:
         probability = typing.Self.__memory_threshold_prob
         if not(task.solved):
             probability *= 0.5
-        point = np.random.uniform(size=1)[0]
+        point = typing.Self._generator.uniform(size=1)[0]
         if point <= probability:
             typing.Self.__long_memorized_tasks[task] = date
             return True
@@ -244,7 +249,7 @@ class Student:
             0.05 * (1.0 - (len(typing.Self.learning_lang) / typing.Self.getUniqueLangs())) +\
             0.2 * (1.0 - typing.Self.fatige) + 0.02 * (1 - a_e) + 0.3 * in_short_mem + 0.2 * in_long_mem
         
-        return probability <= np.random.uniform(size=1)[0]
+        return probability <= typing.Self._generator.uniform(size=1)[0]
     
     def getUniqueLangs() -> np.ndarray[Language]:
         lang_dict = dict()
@@ -271,7 +276,7 @@ class Student:
         
     def solveSomeTasks(limit: np.timedelta64, start_date: np.datetime64) -> np.ndarray[Tuple[Task, np.datetime64]]:
         learning_lang = np.random.Generator.choice(a=typing.Self.getUniqueLangs, size=1)
-        task_delta = np.timedelta64(np.around(np.random.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
+        task_delta = np.timedelta64(np.around(typing.Self._generator.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
         zero = np.timedelta64(0, 's')
         session = Session()
         session.start = start_date
@@ -281,13 +286,13 @@ class Student:
         while (limit - task_delta > zero) and (typing.Self.fatige < 1.0):
             limit -= task_delta
             start_date += task_delta
-            task = getTask(learning_lang)
+            task = getTask(learning_lang, typing.Self._generator)
             resultForTask = typing.Self.canSolve(task)
             logResult(task, start_date - task_delta, start_date)
             task.solved = resultForTask
             result.append((task, start_date))
             typing.Self.increaseFatige(learning_lang)
-            task_delta = np.timedelta64(np.around(np.random.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
+            task_delta = np.timedelta64(np.around(typing.Self._generator.normal(loc=typing.Self.average_time_per_task * 60) / 60.0, 0), 'm')
             
             session.tasks += 1
             if task.solved:
@@ -320,7 +325,7 @@ class Student:
             
         if session.tasks == 0:
             task_delta = limit
-            task = getTask(learning_lang)
+            task = getTask(learning_lang, typing.Self._generator)
             resultForTask = typing.Self.canSolve()
             logResult(task, start_date - task_delta, start_date)
             task.solved = resultForTask
@@ -355,7 +360,7 @@ class Student:
         minimum = 5.0 * 60.0
         result = 0.0
         while (result <= minimum) or (result > delta):
-            result = np.random.normal(loc = typing.Self.average_working_time * 60)
+            result = typing.Self._generator.normal(loc = typing.Self.average_working_time * 60)
         return np.timedelta64(np.around(result, 0), 's')
         
 
@@ -370,13 +375,13 @@ class Student:
         if typing.Self.state == StudentState.Initial:
             typing.Self.state = calcNextState([0.6, 0.3, 0.08, 0.02])
             if typing.Self.state == StudentState.Inactive:
-                typing.Self._next_event_time = np.random.uniform(low = typing.Self._next_event_time, high = typing.Self._next_event_time \
+                typing.Self._next_event_time = typing.Self._generator.uniform(low = typing.Self._next_event_time, high = typing.Self._next_event_time \
                                                           + np.timedelta64(100, 'D'))
             elif typing.Self.state == StudentState.Dead:
                 typing.Self._next_event_time = np.datetime64('1970-01-01T00:00')
 
             elif typing.Self.state == StudentState.Learning:
-                typing.Self._next_event_time = np.random.uniform(low = typing.Self._next_event_time, high = typing.Self._next_event_time \
+                typing.Self._next_event_time = typing.Self._generator.uniform(low = typing.Self._next_event_time, high = typing.Self._next_event_time \
                                                           + np.timedelta64(10, 'D'))
 
                 typing.Self.increasePositiveProb()
