@@ -1,7 +1,7 @@
 from enum import Enum
 import numpy as np
+from datetime import datetime
 import pandas as pd
-import typing
 import scipy.stats as sps
 from collections.abc import Callable
 from typing import List, Tuple, Dict
@@ -87,7 +87,11 @@ task_data = pd.read_csv('./all_real_task_data.csv')
 def getTask(learning_lang: Language, generator: np.random.Generator) -> Task:
     obj_id = learning_lang.id[0]
     session_id = learning_lang.id[1]
-    task_row = task_data[(task_data.language_object_id == obj_id) & (task_data.language_session_id == session_id)].sample(1, random_state=generator)
+    course_order = learning_lang.lvl.value
+    task_row = task_data[(task_data.language_object_id == obj_id) &\
+                          (task_data.language_session_id == session_id) &\
+                              (task_data.course_order == course_order)]\
+                                .sample(1, random_state=generator)
     result = Task()
     result.id = [task_row.iloc[0]['task_object_id'], task_row.iloc[0]['task_session_id']]
     result.course_id = [task_row.iloc[0]['course_object_id'], task_row.iloc[0]['course_session_id']]
@@ -104,7 +108,7 @@ def getTask(learning_lang: Language, generator: np.random.Generator) -> Task:
 def languageFactory(df: pd.DataFrame)->list[Language]:
     result = []
     for _, row in df.iterrows():
-        tmp = Language(int(row['course_order']), row['language_name'], [row['language_object_id'], row['language_session_id']])
+        tmp = Language(LanguageLvl(int(row['course_order'])), row['language_name'], [row['language_object_id'], row['language_session_id']])
         result.append(tmp)
     return result
 
@@ -139,7 +143,7 @@ class Student:
     initial_testing: dict[Language, np.double]
     native_language: Language
     average_time_per_task: np.ndarray[Tuple[Language, np.double]]
-    average_working_time: np.ndarray[np.timedelta64]
+    average_working_time: np.timedelta64
     lang_qualification: dict[Language, Qualification]
     activity_times: list[Tuple[Topic, np.datetime64]]
     motivated: bool
@@ -157,12 +161,12 @@ class Student:
 
     def __init__(self, ID: int, learning_langs: list[Language], native_lang: Language, 
                 average_task_time: np.ndarray[Tuple[Language, np.double]], initial_tests: dict[Language, np.double],
-                 average_session_time: np.ndarray[np.timedelta64], fatige_coef: list[Tuple[LanguageLvl, np.double]],
+                 average_session_time: np.timedelta64, fatige_coef: list[Tuple[LanguageLvl, np.double]],
                  initial_qualification: dict[Language, Qualification], prob_threshold: np.double, 
                  registration_date: np.datetime64, np_seed: int,
                  motivated: bool):
         self.id = ID
-        self.state = StudentState.Initial
+        self.state = StudentState.Initial.value
         self.fatige = 0.0
         self.fatige_per_task = fatige_coef
         self.native_language = native_lang
@@ -186,17 +190,20 @@ class Student:
         self.__long_memorized_tasks = dict()
         self.__short_memorized_tasks = dict()
 
+        self.__activity_tmstmp = np.array([])
+        self.__activity_tmstmp_count = 0
+
 
     def __correlation_lvl(self, language: Language) -> np.double:
         lvl = 0
-        if self.lang_qualification[language] == Qualification.Middle:
-            lvl = LanguageLvl.B2
-        if self.lang_qualification[language] == Qualification.High:
-            lvl = LanguageLvl.C1
+        if self.lang_qualification[language].value == Qualification.Middle.value:
+            lvl = LanguageLvl.B2.value
+        if self.lang_qualification[language].value == Qualification.High.value:
+            lvl = LanguageLvl.C1.value
 
-        if language.lvl < self.lang_qualification[language]:
+        if language.lvl.value < self.lang_qualification[language].value:
             return 1.0
-        if language.lvl == self.lang_qualification[language]:
+        if language.lvl.value == self.lang_qualification[language].value:
             return 0.5
         return 0.0
     
@@ -204,6 +211,8 @@ class Student:
     def __get_average_errors_normalized(self, language: Language) -> np.double:
         sum = 0.0
         tasks = 0
+        if len(self.sessions[language]) == 0:
+            return 1.0
         for session in self.sessions[language]:
             sum += (session.solved / session.tasks)
             tasks += session.tasks
@@ -223,9 +232,9 @@ class Student:
         count = 0
         existsGlobalDelfa = False
         for session in self.sessions[getLangById(task.language_id)]:
-            if date - session.finish <= np.timedelta64(7, 'd') and task in session.tasks:
+            if date - session.finish <= np.timedelta64(7, 'D') and task in session.solved_tasks:
                 count += 1
-            if date - session.finish >= np.timedelta64(3, 'd'):
+            if date - session.finish >= np.timedelta64(3, 'D'):
                 existsGlobalDelfa = True
         
         if existsGlobalDelfa and np.around(3.0 / (0.3 * self.__memory_threshold_prob), 0) >= count:
@@ -237,7 +246,7 @@ class Student:
 
     def canSolve(self, task: Task) -> bool:
         language = getLangById(task.language_id)
-        correlation = self.__get_average_errors_normalized(language)
+        correlation = self.__correlation_lvl(language)
         initial_score = self.initial_testing[language]
         a_e = self.__get_average_errors_normalized(language)
         inverted_task = task
@@ -247,7 +256,7 @@ class Student:
         in_long_mem = task in self.__long_memorized_tasks
 
         probability = 0.01 * correlation + 0.03 * initial_score + 0.1 * self.isLearningRecenlty +\
-            0.05 * (1.0 - (len(self.learning_lang) / self.getUniqueLangs())) +\
+            0.05 * (1.0 - (len(self.learning_langs) / len(self.getUniqueLangs()))) +\
             0.2 * (1.0 - self.fatige) + 0.02 * (1 - a_e) + 0.3 * in_short_mem + 0.2 * in_long_mem
         
         return probability <= self._generator.uniform(size=1)[0]
@@ -271,29 +280,36 @@ class Student:
     
 
     def increaseFatige(self, learning_language: Language):
-        new_fatigue = self.fatige + 0.01 * learning_language.lvl
+        new_fatigue = self.fatige + 0.01 * learning_language.lvl.value
         if new_fatigue <= 1.0:
             self.fatige = new_fatigue
         
     def solveSomeTasks(self, limit: np.timedelta64, start_date: np.datetime64) -> np.ndarray[Tuple[Task, np.datetime64]]:
-        learning_lang = np.random.Generator.choice(a=self.getUniqueLangs, size=1)
-        task_delta = np.timedelta64(np.around(self._generator.normal(loc=self.average_time_per_task * 60) / 60.0, 0), 'm')
-        zero = np.timedelta64(0, 's')
+        learning_lang = self._generator.choice(a=self.getUniqueLangs(), size=1)[0]
+        average_time = 0.0
+        for lang, time in self.average_time_per_task:
+            if lang == learning_lang:
+                average_time = time
+                break
+        
+        task_delta = np.timedelta64(int(np.around(self._generator.normal(loc=average_time), 0)), 's')
+        zero = np.timedelta64(0, 'm')
         session = Session()
         session.start = start_date
         session.solved = 0
         session.tasks = 0
+        session.solved_tasks = []
         result = []
         while (limit - task_delta > zero) and (self.fatige < 1.0):
             limit -= task_delta
             start_date += task_delta
             task = getTask(learning_lang, self._generator)
             resultForTask = self.canSolve(task)
-            logResult(task, start_date - task_delta, start_date)
             task.solved = resultForTask
+            logResult(task, start_date - task_delta, start_date)
             result.append((task, start_date))
             self.increaseFatige(learning_lang)
-            task_delta = np.timedelta64(np.around(self._generator.normal(loc=self.average_time_per_task * 60) / 60.0, 0), 'm')
+            task_delta = np.timedelta64(int(np.around(self._generator.normal(loc=average_time), 0)), 's')
             
             session.tasks += 1
             if task.solved:
@@ -306,12 +322,12 @@ class Student:
                 self.tryToAddToShortMemory(task, start_date)
             else:
                 if task in self.__short_memorized_tasks and \
-                    start_date - task_data - self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
+                    start_date - task_delta - self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
                     del self.__short_memorized_tasks[task]
                     self.tryToAddToShortMemory(task, start_date)
 
                 if inverted_task in self.__short_memorized_tasks and \
-                    start_date - task_data - self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
+                    start_date - task_delta - self.__short_memorized_tasks[task] > np.timedelta64(1, 'h'):
                     del self.__short_memorized_tasks[inverted_task]
                     self.tryToAddToShortMemory(task, start_date)
             
@@ -319,7 +335,7 @@ class Student:
                 self.tryToAddToLongMemory(task, start_date)
             else:
                 if task in self.__long_memorized_tasks and \
-                    start_date - task_data - self.__long_memorized_tasks[task] > np.timedelta64(1, 'y'):
+                    start_date - task_delta - self.__long_memorized_tasks[task] > np.timedelta64(365*24*60, 's'):
                     del self.__long_memorized_tasks[task]
                     self.tryToAddToLongMemory(task, start_date)
 
@@ -360,9 +376,10 @@ class Student:
     def calcWorkDuration(self, delta: np.timedelta64) -> np.timedelta64:
         minimum = 5.0 * 60.0
         result = 0.0
-        while (result <= minimum) or (result > delta):
-            result = self._generator.normal(loc = self.average_working_time * 60)
-        return np.timedelta64(np.around(result, 0), 's')
+        double_delta = delta.astype('double')
+        while (result <= minimum) or (result > double_delta):
+            result = self._generator.normal(loc = self.average_working_time.astype('double'))
+        return np.timedelta64(int(np.around(result, 0)), 's')
         
 
     def increasePositiveProb(self, ):
@@ -373,29 +390,35 @@ class Student:
     
     def call(self, ) -> np.datetime64:
         # initial state processing
-        if self.state == StudentState.Initial:
+        if self.state == StudentState.Initial.value:
             self.state = calcNextState([0.6, 0.3, 0.08, 0.02], self._generator)
-            if self.state == StudentState.Inactive:
-                self._next_event_time = self._generator.uniform(low = self._next_event_time, high = self._next_event_time \
-                                                          + np.timedelta64(100, 'D'))
-            elif self.state == StudentState.Dead:
+            if self.state == StudentState.Inactive.value:
+                self._next_event_time = np.array([self._generator.uniform(low = self._next_event_time, high = self._next_event_time \
+                                                          + np.timedelta64(100, 'D'))]).astype('datetime64[m]')[0]
+            elif self.state == StudentState.Dead.value:
                 self._next_event_time = np.datetime64('1970-01-01T00:00')
 
-            elif self.state == StudentState.Learning:
-                self._next_event_time = self._generator.uniform(low = self._next_event_time, high = self._next_event_time \
-                                                          + np.timedelta64(10, 'D'))
+            elif self.state == StudentState.Learning.value:
+                self._next_event_time = np.array([self._generator.uniform(
+                    low = self._next_event_time.astype('double'), 
+                    high = (self._next_event_time + np.timedelta64(10, 'D')).astype('double')
+                )]).astype('datetime64[m]')[0]
+                # self._next_event_time = sps.uniform.rvs(
+                #     loc=np.datetime_as_string(self._next_event_time.astype('float64')),
+                #     scale=np.datetime_as_string(self._next_event_time + np.timedelta64(10, 'D')),
+                # )
 
                 self.increasePositiveProb()
             
-            elif self.state == StudentState.Working:
+            elif self.state == StudentState.Working.value:
                 self.setWorkingDates(self._next_event_time)
                 self._next_event_time = self.__activity_tmstmp[0]
                 self.__activity_tmstmp_count = 0
         
         # current state is working
-        elif self.state == StudentState.Working:
+        elif self.state == StudentState.Working.value:
             working_duration = self.calcWorkDuration(
-                self.__activity_tmstmp[self.__activity_tmstmp + 1] - self.__next_event_time)
+                self.__activity_tmstmp[self.__activity_tmstmp_count + 1] - self._next_event_time)
             self.solveSomeTasks(working_duration, self._next_event_time)
             
             self._next_event_time += working_duration
@@ -407,9 +430,9 @@ class Student:
             ])
             langs = self.getUniqueLangs()
             result_prob = np.array([0.0, 0.0, 0.0, 0.0])         
-            vectors = np.array([prob_i for _ in len(langs)])
+            vectors = np.array([prob_i for _ in langs])
             for i, language in enumerate(langs):
-                if language.lvl < LanguageLvl.B1:
+                if language.lvl.value < LanguageLvl.B1.value:
                     vectors[i][2] += 0.1
                     vectors[i][1] -= 0.1
                 if self.motivated:
@@ -417,37 +440,66 @@ class Student:
                     vectors[i][2] -= 0.1
                     vectors[i][3] -= 0.1
                 if self.__activity_tmstmp[self.__activity_tmstmp_count + 1] \
-                - self.__activity_tmstmp[self.__activity_tmstmp_count] <= np.timedelta64(24, 'H'):
+                - self.__activity_tmstmp[self.__activity_tmstmp_count] <= np.timedelta64(24, 'h'):
                     vectors[i][1] -= 0.05
                     vectors[i][2] += 0.05
                 if self.__activity_tmstmp[self.__activity_tmstmp_count + 1] \
-                - self.__activity_tmstmp[self.__activity_tmstmp_count] > np.timedelta64(24, 'H'):
+                - self.__activity_tmstmp[self.__activity_tmstmp_count] > np.timedelta64(24, 'h'):
                     vectors[i][1] += 0.03
                     vectors[i][2] -= 0.03
-                for j in len(vectors[i]):
+                for j in range(len(vectors[i])):
                     result_prob[j] += vectors[i][j]
 
             for i in range(len(result_prob)):
                 result_prob[i] = result_prob[i] / np.double(len(langs))
 
             self.state = calcNextState(result_prob, self._generator)
-            if self.state == StudentState.Dead:
+            if self.state == StudentState.Dead.value:
                 self._next_event_time = np.datetime64('1970-01-01T00:00')
             
             self.__activity_tmstmp_count += 1
         
         # other states
-        elif self.state != StudentState.Dead:
-            if self.state == StudentState.Learning:
+        elif self.state != StudentState.Dead.value:
+            if self.state == StudentState.Learning.value:
                 self.increasePositiveProb()
-            elif self.state == StudentState.Inactive:
+            elif self.state == StudentState.Inactive.value:
                 self.decreasePositiveProb()
             self.state = calcNextState([1.0, 0.0, 0.0, 0.0], self._generator)
-            if self.state == StudentState.Working:
+            if self.state == StudentState.Working.value:
+                if len(self.__activity_tmstmp) == 0:
+                    self.setWorkingDates(self._next_event_time)
+                
                 self._next_event_time = self.__activity_tmstmp[self.__activity_tmstmp_count]
         
         return self._next_event_time
     
+
+
+def dates_range(start, end, date_format, distribution_size, scale_ratio, seed):
+    # Converting to timestamp
+    start = datetime.strptime(start, date_format).timestamp()
+    end = datetime.strptime(end, date_format).timestamp()
+    
+    # Generate Normal Distribution
+    mu = (end - start) / 2 + start
+    sigma = (end - start) * scale_ratio
+    generator = np.random.default_rng(seed)
+    a_transformed, b_transformed = (start - mu) / sigma, (end - mu) / sigma
+    total_distribution = sps.truncnorm(
+        loc=mu, 
+        scale=sigma, 
+        a=a_transformed,
+        b=b_transformed
+    ).rvs(random_state=generator, size=distribution_size,)
+
+    # Sort and Convert back to datetime
+    sorted_distribution = np.sort(total_distribution)
+    date_range = [np.datetime64(datetime.fromtimestamp(t)) for t in sorted_distribution]
+    # print(date_range)
+    for date in date_range:
+        print(date)
+    return date_range
 
 
 def main():
@@ -455,22 +507,30 @@ def main():
     first_student = Student(
         ID=1, 
         learning_langs=[languages[0]], 
-        native_lang=Language(level=5, lang_name='русский', lang_id=[12, 0]),
+        native_lang=Language(level=LanguageLvl.A1, lang_name='русский', lang_id=[12, 0]),
         average_task_time=np.array([(languages[0], 40)]),
-        initial_tests=np.array([(languages[0], 0.3)]),
-        average_session_time=np.array([(languages[0], 15 * 60)]),
+        initial_tests={languages[0]: 0.3},
+        average_session_time=np.timedelta64(15 * 60, 's'),
         fatige_coef=[
             (j, 0.01 * j) for j in range(1, 7)
         ],
         initial_qualification={
             languages[0]: Qualification.Low
         },
-        prob_threshold=0.4,
-        registration_date=np.datetime64('2024-01-05'),
+        prob_threshold=0.1,
+        registration_date=np.datetime64('2024-01-05T15:30'),
         np_seed=101010101,
         motivated=True
     )
+    first_student.active_dates_generator = lambda x: dates_range(
+        start=np.datetime_as_string(x), 
+        end=np.datetime_as_string(x + np.timedelta64(1 * 365 * 24 * 60, 'm')),
+        distribution_size=365*2,
+        scale_ratio=0.5,
+        seed=101010,
+        date_format = '%Y-%m-%dT%H:%M'
+    )
     for i in range(10):
         print(i)
-        first_student.call()
+        print(first_student.call())
 main()
