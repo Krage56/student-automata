@@ -6,27 +6,7 @@ import scipy.stats as sps
 from collections.abc import Callable
 from typing import List, Tuple, Dict
 
-
-
 precision = 6
-class LanguageLvl(Enum):
-    A1 = 1
-    A2 = 2
-    B1 = 3
-    B2 = 4
-    C1 = 5
-    C2 = 6
-
-class Language:
-    lvl: LanguageLvl
-    name: str
-    id: list[int]
-
-    def __init__(self, level: int, lang_name: str, lang_id: list):
-        self.lvl = level
-        self.name = lang_name
-        self.id = lang_id
-
 
 class StudentState(Enum):
     Initial = 0
@@ -59,6 +39,27 @@ class Task:
     topic_id: list[list[int]]
     language_id: list[int]
     solved: bool
+
+
+class LanguageLvl(Enum):
+    A1 = 1
+    A2 = 2
+    B1 = 3
+    B2 = 4
+    C1 = 5
+    C2 = 6
+
+class Language:
+    lvl: LanguageLvl
+    name: str
+    id: list[int]
+    course: list[int]
+
+    def __init__(self, level: int, lang_name: str, lang_id: list, course_id: list):
+        self.lvl = level
+        self.name = lang_name
+        self.id = lang_id
+        self.course = course_id
 
 
 
@@ -108,7 +109,18 @@ def getTask(learning_lang: Language, generator: np.random.Generator) -> Task:
 def languageFactory(df: pd.DataFrame)->list[Language]:
     result = []
     for _, row in df.iterrows():
-        tmp = Language(LanguageLvl(int(row['course_order'])), row['language_name'], [row['language_object_id'], row['language_session_id']])
+        tmp = Language(
+            LanguageLvl(int(row['course_order'])), 
+            row['language_name'], 
+            [
+                row['language_object_id'], 
+                row['language_session_id']
+            ],
+            [
+                row['course_object_id'],
+                row['course_session_id']
+            ]
+        )
         result.append(tmp)
     return result
 
@@ -124,9 +136,9 @@ languages = languageFactory(
     )
 )
 
-def getLangById(id: list[int]):
+def getLangById(id: list[int], course: list[int]):
     for language in languages:
-        if language.id == id:
+        if language.id == id and language.course == course:
             return language
 
 
@@ -231,7 +243,7 @@ class Student:
     def tryToAddToLongMemory(self, task: Task, date: np.datetime64) -> bool:
         count = 0
         existsGlobalDelfa = False
-        for session in self.sessions[getLangById(task.language_id)]:
+        for session in self.sessions[getLangById(task.language_id, task.course_id)]:
             if date - session.finish <= np.timedelta64(7, 'D') and task in session.solved_tasks:
                 count += 1
             if date - session.finish >= np.timedelta64(3, 'D'):
@@ -245,7 +257,7 @@ class Student:
         
 
     def canSolve(self, task: Task) -> bool:
-        language = getLangById(task.language_id)
+        language = getLangById(task.language_id, task.course_id)
         correlation = self.__correlation_lvl(language)
         initial_score = self.initial_testing[language]
         a_e = self.__get_average_errors_normalized(language)
@@ -364,7 +376,7 @@ class Student:
         else:
             session.finish = start_date
 
-        session.language = getLangById(result[-1][0].language_id)
+        session.language = getLangById(result[-1][0].language_id, result[-1][0].course_id)
 
         self.sessions[session.language].append(session)
 
@@ -393,8 +405,8 @@ class Student:
         if self.state == StudentState.Initial.value:
             self.state = calcNextState([0.6, 0.3, 0.08, 0.02], self._generator)
             if self.state == StudentState.Inactive.value:
-                self._next_event_time = np.array([self._generator.uniform(low = self._next_event_time, high = self._next_event_time \
-                                                          + np.timedelta64(100, 'D'))]).astype('datetime64[m]')[0]
+                self._next_event_time = np.array([self._generator.uniform(low = self._next_event_time.astype('double'), 
+                                          high = (self._next_event_time + np.timedelta64(100, 'D')).astype('double'))]).astype('datetime64[m]')[0]
             elif self.state == StudentState.Dead.value:
                 self._next_event_time = np.datetime64('1970-01-01T00:00')
 
@@ -403,10 +415,6 @@ class Student:
                     low = self._next_event_time.astype('double'), 
                     high = (self._next_event_time + np.timedelta64(10, 'D')).astype('double')
                 )]).astype('datetime64[m]')[0]
-                # self._next_event_time = sps.uniform.rvs(
-                #     loc=np.datetime_as_string(self._next_event_time.astype('float64')),
-                #     scale=np.datetime_as_string(self._next_event_time + np.timedelta64(10, 'D')),
-                # )
 
                 self.increasePositiveProb()
             
@@ -423,10 +431,10 @@ class Student:
             
             self._next_event_time += working_duration
             prob_i = np.array([
-                0.0,                             #Working 
-                np.around(1.0 / 3.0, precision), #Learning
-                np.around(1.0 / 3.0, precision), #Inactive
-                np.around(1.0 / 3.0, precision), #Dead
+                0.29, #Working 
+                0.29, #Learning
+                0.29, #Inactive
+                0.13, #Dead
             ])
             langs = self.getUniqueLangs()
             result_prob = np.array([0.0, 0.0, 0.0, 0.0])         
@@ -506,31 +514,31 @@ def main():
     print(f"{languages[0].name} {languages[0].lvl} {languages[0].id}")
     first_student = Student(
         ID=1, 
-        learning_langs=[languages[0]], 
-        native_lang=Language(level=LanguageLvl.A1, lang_name='русский', lang_id=[12, 0]),
-        average_task_time=np.array([(languages[0], 40)]),
-        initial_tests={languages[0]: 0.3},
+        learning_langs=[languages[2]], 
+        native_lang=Language(level=LanguageLvl.A1, lang_name='русский', lang_id=[12, 0], course_id=None),
+        average_task_time=np.array([(languages[2], 40)]),
+        initial_tests={languages[2]: 0.3},
         average_session_time=np.timedelta64(15 * 60, 's'),
         fatige_coef=[
             (j, 0.01 * j) for j in range(1, 7)
         ],
         initial_qualification={
-            languages[0]: Qualification.Low
+            languages[2]: Qualification.Middle
         },
-        prob_threshold=0.1,
+        prob_threshold=0.3,
         registration_date=np.datetime64('2024-01-05T15:30'),
-        np_seed=101010101,
+        np_seed=5649849415165165160000000000000000000000000556162516216251915165,
         motivated=True
     )
     first_student.active_dates_generator = lambda x: dates_range(
         start=np.datetime_as_string(x), 
         end=np.datetime_as_string(x + np.timedelta64(1 * 365 * 24 * 60, 'm')),
         distribution_size=365*2,
-        scale_ratio=0.5,
-        seed=101010,
+        scale_ratio=0.02,
+        seed=556161691000000000000522,
         date_format = '%Y-%m-%dT%H:%M'
     )
-    for i in range(10):
+    for i in range(100):
         print(i)
         print(first_student.call())
 main()
