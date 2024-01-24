@@ -62,4 +62,16 @@ The model has a number of assumptions:
     - Inactive: student have gone till next `event`;
     - Dead: student left the system.
 1. Tasks are not correlated with each other by topics and other features;
-1. The rest will be soon.
+1. Student can memorize only tasks, not the topic or something else;
+1. Motivated student have more events then unmotivated;
+1. Student can't change his qualification;
+1. If there is a plenty of courses for one languages in student's model then user is solving the course with the highest order;
+
+
+## Probability for task solving
+$0.01 \cdot correlation + 0.03 \cdot initialScore + 0.1 \cdot isLearningRecently + 0.05 \cdot \left(1 - \frac{\left|uniqueLearningLanguages\right|}{\left|learningLanguages\right|}\right)  + 0.2 \cdot \left(1 - fatige\right) + 0.02 \cdot (1 - averageErrors) + 0.3 \cdot inShortMemory + 0.2 \cdot inLongMemory$,
+
+where `correlation` is correlation between defined course level and student's level in the $[0;1]$ (another words if student's qualification is higher then the course level then correlation should be higher then zero); `isLearningRecently` is the boolean feature that displaying that previous state was 'Learning' and now probability of right solving is higher; `learningLanguage` is a set of all language courses meanwhile `uniqueLearningLanguages` is a set of languages that student is studying; `averageErrors` is the number in $[0,1]$ represents the average proportion of errors per session; `inShortMemory` is a boolean feature that is True when the task in the short student's memory; `inLongMemory` is similar with `inShortMemory`.
+
+## Calculation of the state
+TODO
