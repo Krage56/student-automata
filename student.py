@@ -268,7 +268,7 @@ class Student:
         in_long_mem = task in self.__long_memorized_tasks
 
         probability = 0.01 * correlation + 0.03 * initial_score + 0.1 * self.isLearningRecenlty +\
-            0.05 * (1.0 - (len(self.learning_langs) / len(self.getUniqueLangs()))) +\
+            0.05 * (1.0 - (len(self.getUniqueLangs()) / len(self.learning_langs))) +\
             0.2 * (1.0 - self.fatige) + 0.02 * (1 - a_e) + 0.3 * in_short_mem + 0.2 * in_long_mem
         
         return probability <= self._generator.uniform(size=1)[0]
