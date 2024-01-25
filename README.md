@@ -69,9 +69,33 @@ The model has a number of assumptions:
 
 
 ## Probability for task solving
-$0.01 \cdot correlation + 0.03 \cdot initialScore + 0.1 \cdot isLearningRecently + 0.05 \cdot \left(1 - \frac{\left|uniqueLearningLanguages\right|}{\left|learningLanguages\right|}\right)  + 0.2 \cdot \left(1 - fatige\right) + 0.02 \cdot (1 - averageErrors) + 0.3 \cdot inShortMemory + 0.2 \cdot inLongMemory$,
+$$p := 0.01 \cdot correlation + 0.03 \cdot initialScore + 0.1 \cdot isLearningRecently + $$
+
+$$+ 0.05 \cdot \left(1 - \frac{\left|uniqueLearningLanguages\right|}{\left|learningLanguages\right|}\right) + $$
+
+$$+ 0.2 \cdot \left(1 - fatige\right) + 0.02 \cdot (1 - averageErrors) + 0.3 \cdot inShortMemory + 0.2 \cdot inLongMemory$$
 
 where `correlation` is correlation between defined course level and student's level in the $[0;1]$ (another words if student's qualification is higher then the course level then correlation should be higher then zero); `isLearningRecently` is the boolean feature that displaying that previous state was 'Learning' and now probability of right solving is higher; `learningLanguage` is a set of all language courses meanwhile `uniqueLearningLanguages` is a set of languages that student is studying; `averageErrors` is the number in $[0,1]$ represents the average proportion of errors per session; `inShortMemory` is a boolean feature that is True when the task in the short student's memory; `inLongMemory` is similar with `inShortMemory`.
 
 ## Calculation of the state
-TODO
+There are 4 real states and one fake state:
+
+0. Initial (fake)
+1. Working
+1. Learning
+1. Inactive
+1. Dead
+
+At the beginnig student have an `initial` state and the probability vector $\overline{v} = \left(W, L, I, D\right)^T$ with the values $\left(0.6, 0.3, 0.08, 0.02\right)^T$.
+
+After the first tranformation of state the probability vector is calculated according to the algorithm above:
+1. At first $\overline{v} = \left(0.29, 0.29, 0.29, 0.13\right)^T$ for every learning language;
+1. If level of the language is lower to the B1 then I-coordinate is += 0.1 and the L-coordinate is -= 0.1
+1. If the student is motivated then L-coordinated is += 0.2 and I- and D- coordinates -= 0.1 respectively
+1. If the gap between previous and current event is less then 24 hours then L-coordinate is -= 0.05 and I-coordinate is += 0.05;
+1. If the gap between previous and current event is more then 24 hours then L-coordinate is += 0.03 and I-coordinate is += 0.03;
+1. Finally commponents of the vectors are  summurized and normilized:
+
+$$
+\overline{v} = \frac{1}{|languages|}(\sum\limits_i^{|languages|}W_i, \sum\limits_i^{|languages|}L_i, \sum\limits_i^{|languages|}I_i, \sum\limits_i^{|languages|}D_i)
+$$
