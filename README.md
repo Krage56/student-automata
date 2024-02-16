@@ -54,19 +54,22 @@ first_student.active_dates_generator = lambda x: dates_range(
 - the rest of methods are not supposed to be called by the user manually.
 
 ## Model description
-The model has a number of assumptions:
+Main purpose of the model is in modeling a process of learning on language learning platform for testing proposed algorithms of tasks recommendation.
+
+Now the model has a number of assumptions and limitations:
 1. Student learns the only one language from the `learning_langs` per session and the language is choosen according to the uniform distribution;
 1. Student has only 4 states:
     - Working: student is solving tasks;
     - Learning: student have gone away from the system and with the next event is returning with higher probability of the right solving for tasks;
     - Inactive: student have gone till next `event`;
     - Dead: student left the system.
-1. Tasks are not correlated with each other by topics and other features;
+1. Tasks for model are not correlated with each other by topics and other structure features (TODO: add possibility to analize structure of tasks by their structure, lexemes, topics);
 1. Student can memorize only tasks, not topic or something else;
 1. Motivated student has more events than unmotivated;
-1. Student can't change its qualification;
+1. ~~Student can't change its qualification;~~ Student can improve their qualification after at least 3 successful sessions (there are positive answers more than 90%) during a week when there is at least one gap between sessions 24 hours long;
 1. If there is a plenty of courses for one languages in student's model than user is solving the course with the highest order;
 
+Also it is going to be added the list of hard topics for every student that is affecting negatively in probability of correct task solving (TODO).
 
 ## Probability for task solving
 $$p := 0.01 \cdot correlation + 0.03 \cdot initialScore + 0.1 \cdot isLearningRecently + $$

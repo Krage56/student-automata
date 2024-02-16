@@ -106,6 +106,15 @@ def getTask(learning_lang: Language, generator: np.random.Generator) -> Task:
     result.solved = False
     return result
 
+def getCourseSize(course_lang: Language) -> int:
+    obj_id = course_lang.id[0]
+    session_id = course_lang.id[1]
+    course_order = course_lang.lvl.value
+    return task_data[(task_data.language_object_id == obj_id) &\
+                          (task_data.language_session_id == session_id) &\
+                              (task_data.course_order == course_order)].shape[0]
+
+
 def languageFactory(df: pd.DataFrame)->list[Language]:
     result = []
     for _, row in df.iterrows():
@@ -212,13 +221,54 @@ class Student:
             lvl = LanguageLvl.B2.value
         if self.lang_qualification[language].value == Qualification.High.value:
             lvl = LanguageLvl.C1.value
+        if self.lang_qualification[language].value == Qualification.Low.value:
+            lvl = LanguageLvl.A1.value
 
-        if language.lvl.value < self.lang_qualification[language].value:
+        if language.lvl.value < lvl:
             return 1.0
-        if language.lvl.value == self.lang_qualification[language].value:
+        elif language.lvl.value == lvl:
             return 0.5
-        return 0.0
+        else:
+            return 0.0
     
+    def tryToIncreaseQualification(self, language: Language) -> bool:
+        if self.lang_qualification[language].value == Qualification.High.value:
+            return False
+        
+        point = self._generator.uniform(size=1)[0]
+        # 1.0 - course's lvl higher than student's lvl
+        # 0.5 - course's lvl equal with student's lvl
+        # 0.0 - course's lvl less than student's lvl -> increasing of qualification is impossible
+        if ((1.0 - self.__correlation_lvl(language)) >= point):
+            current_date = self.sessions[language][-1].finish
+            print(f"Qualification of student {self.id} may be upped at {current_date}")
+            sessions = self.sessions[language]
+            success_sessions = []
+            success_sessions_num = 3
+            for session in sessions[-1::-1]:
+                if current_date - session.finish <= np.timedelta64(7 * 24 * 60 * 60, 's') and \
+                session.solved / session.tasks >= 0.9:
+                    success_sessions.append(session)
+                else: 
+                    break
+            
+            if len(success_sessions) < success_sessions_num:
+                print(f"Qualification of student {self.id} may not be upped due to lack of success sessions: {len(success_sessions)} opposite {success_sessions_num}")
+                return False
+            
+            tasks = set()
+            latest_session = success_sessions[0]
+            delta_24_h_exists = False
+            for i, success in enumerate(success_sessions[1::]):
+                if latest_session.finish - success.finish >= np.timedelta64(24 * 60 * 60, 's'):
+                    delta_24_h_exists = True
+                tasks.update(success.solved_tasks)
+
+            print(f"For Student {self.id} timedelta in 24h is {delta_24_h_exists}")
+            print(f"For Student {self.id} total task coverage is {len(tasks) / getCourseSize(language) > 0.7}")
+            return delta_24_h_exists and (len(tasks) / getCourseSize(language) > 0.7)       
+        else:
+            return False
 
     def __get_average_errors_normalized(self, language: Language) -> np.double:
         sum = 0.0
@@ -380,6 +430,12 @@ class Student:
 
         self.sessions[session.language].append(session)
 
+        is_upped = self.tryToIncreaseQualification(session.language)
+        if is_upped:
+            print(
+            f'''Congratulation! The qualification of student {self.id} have been upped! Now he has {str(self.lang_qualification[session.language])}'''
+            )    
+
         self.fatige = 0.0
         return np.array(result)
     
@@ -484,7 +540,7 @@ class Student:
     
 
 
-def dates_range(start, end, date_format, distribution_size, scale_ratio, seed):
+def dates_normal_range(start, end, date_format, distribution_size, scale_ratio, seed):
     # Converting to timestamp
     start = datetime.strptime(start, date_format).timestamp()
     end = datetime.strptime(end, date_format).timestamp()
@@ -523,14 +579,19 @@ def main():
             (j, 0.01 * j) for j in range(1, 7)
         ],
         initial_qualification={
-            languages[2]: Qualification.Middle
+            # languages[2]: Qualification.Middle
+            languages[2]: Qualification.Low
         },
         prob_threshold=0.3,
         registration_date=np.datetime64('2024-01-05T15:30'),
-        np_seed=5649849415165165160000000000000000000000000556162516216251915165,
-        motivated=True
+        # np_seed=5649849415165165160000000000000000000000000556161111111111111111,
+        # np_seed=5649849415165165160000000000000000000000000556162516216251915165,
+        np_seed=575925092391224122,
+        # np_seed=57592509239125,
+        motivated=True,
+        # motivated=False
     )
-    first_student.active_dates_generator = lambda x: dates_range(
+    first_student.active_dates_generator = lambda x: dates_normal_range(
         start=np.datetime_as_string(x), 
         end=np.datetime_as_string(x + np.timedelta64(1 * 365 * 24 * 60, 'm')),
         distribution_size=365*2,
